@@ -1,9 +1,77 @@
-
 # The code is extracted from https://github.com/facebookresearch/ppuda/blob/main/ppuda/deepnets1m/graph.py
 
 import torch
 import torch.nn as nn
+import numpy as np
+import networkx as nx
 
+NormLayers = [nn.BatchNorm2d, nn.LayerNorm]
+
+PRIMITIVES_DEEPNETS1M = [
+    'max_pool',
+    'avg_pool',
+    'sep_conv',
+    'dil_conv',
+    'conv',
+    'msa',
+    'cse',
+    'sum',
+    'concat',
+    'input',
+    'bias',
+    'bn',
+    'ln',
+    'pos_enc',
+    'glob_avg',
+]
+
+def get_conv_name(module, param_name):
+    if param_name.find('bias') >= 0:
+        return 'bias'
+    elif isinstance(module, nn.Conv2d) and module.groups > 1:
+        return ('dil_conv' if min(module.dilation) > 1 else 'sep_conv')
+    return 'conv'
+
+# Supported modules
+MODULES = {
+            nn.Conv2d: get_conv_name,
+            nn.Linear: get_conv_name,
+            nn.BatchNorm2d: lambda module, param_name: 'bn',
+            nn.LayerNorm: lambda module, param_name: 'ln',
+            PosEnc: lambda module, param_name: 'pos_enc',
+            'input': 'input',
+            'Mean': 'glob_avg',
+            'AdaptiveAvgPool2D': 'glob_avg',
+            'MaxPool2DWithIndices': 'max_pool',
+            'AvgPool2D': 'avg_pool',
+            'Clone': 'msa',
+            'Mul': 'cse',
+            'Add': 'sum',
+            'Cat': 'concat',
+        }
+
+
+class PosEnc(nn.Module):
+    def __init__(self, C, ks):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(1, C, ks, ks))
+
+    def forward(self, x):
+        return  x + self.weight
+
+def get_cell_ind(param_name, layers=1):
+    if param_name.find('cells.') >= 0:
+        pos1 = len('cells.')
+        pos2 = pos1 + param_name[pos1:].find('.')
+        cell_ind = int(param_name[pos1: pos2])
+    elif param_name.startswith('classifier') or param_name.startswith('auxiliary'):
+        cell_ind = layers - 1
+    elif layers == 1 or param_name.startswith('stem') or param_name.startswith('pos_enc'):
+        cell_ind = 0
+    else:
+        cell_ind = None
+
+    return cell_ind
 
 class Graph():
     r"""
@@ -467,6 +535,8 @@ class Graph():
         :param font_size: font size for node labels, used only when with_labels=True
         :return:
         """
+        from matplotlib import pyplot as plt
+        from matplotlib import cm as cm
 
         self._nx_graph_from_adj()
 
@@ -554,4 +624,3 @@ class Graph():
             plt.savefig(figname + '.pdf', dpi=fig.dpi)
             plt.savefig(figname + '.png', dpi=fig.dpi, transparent=True)
         plt.show()
-
