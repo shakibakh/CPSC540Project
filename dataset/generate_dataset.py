@@ -1,6 +1,7 @@
 from CPSC540Project.dataset import graph
 import torchvision.models as models
 from torchvision.models import *
+from dataset import graph
 
 def adjust_net(net, large_input=False):
     """
